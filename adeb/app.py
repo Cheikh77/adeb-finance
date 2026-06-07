@@ -1,0 +1,203 @@
+import streamlit as st
+
+from components.header import afficher_header
+from components.navbar import afficher_navbar
+
+from modules.recommandations import afficher_recommandations
+from modules.import_data import importer_releve, filtrer_mois, classifier_transactions
+from modules.objectifs import afficher_objectifs
+from modules.zakat import afficher_zakat
+from modules.dashboard import afficher_kpis, afficher_graphiques_budget, afficher_baraka
+from modules.analyse import (
+    calculer_ratios,
+    afficher_statut_mois,
+    afficher_objectifs_mois,
+    afficher_score_financier,
+    afficher_analyse_intelligente
+)
+from modules.non_classifiees import afficher_transactions_non_classifiees
+
+
+st.set_page_config(page_title="Adeb Finance", layout="wide")
+
+
+def load_css(file_path):
+    with open(file_path, encoding="utf-8") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+
+load_css("assets/style.css")
+
+afficher_header()
+
+page = afficher_navbar()
+
+st.sidebar.markdown("""
+---
+
+### Philosophie
+
+Adeb Finance vise un équilibre entre :
+
+- dépenses,
+- épargne,
+- générosité,
+- vision long terme.
+""")
+
+
+if page == "Objectifs":
+    afficher_objectifs()
+
+
+elif page == "Zakat":
+    afficher_zakat()
+
+
+elif page == "Dashboard":
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.info("Importez votre relevé CSV")
+
+    with c2:
+        st.info("Classification automatique")
+
+    with c3:
+        st.info("Analyse complète de votre budget")
+
+    uploaded_file = st.file_uploader(
+        "Importer votre relevé CSV BoursoBank",
+        type=["csv"]
+    )
+
+    if uploaded_file:
+
+        df = importer_releve(uploaded_file)
+        df = filtrer_mois(df)
+        df = classifier_transactions(df)
+
+        afficher_transactions_non_classifiees(df)
+
+        # Exclusion des transferts neutres des calculs budgétaires
+        df_budget = df[df["type_adeb"] != "Transfert"]
+
+        revenus = df_budget[df_budget["type_adeb"] == "Revenus"]["amount"].sum()
+
+        depenses = abs(
+            df_budget[df_budget["type_adeb"] == "Dépenses"]["amount"].sum()
+        )
+
+        baraka = abs(
+            df_budget[df_budget["type_adeb"] == "Baraka"]["amount"].sum()
+        )
+
+        epargne = abs(
+            df_budget[df_budget["type_adeb"] == "Epargne"]["amount"].sum()
+        )
+
+        solde = revenus - depenses - baraka - epargne
+
+        taux_depenses, taux_epargne, taux_baraka = calculer_ratios(
+            revenus,
+            depenses,
+            baraka,
+            epargne
+        )
+
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "Vue générale",
+            "Dépenses",
+            "Baraka",
+            "Transactions"
+        ])
+
+        with tab1:
+            afficher_kpis(
+                revenus,
+                depenses,
+                baraka,
+                epargne,
+                solde
+            )
+
+            afficher_statut_mois(
+                taux_depenses,
+                taux_epargne,
+                taux_baraka
+            )
+
+            taux_logement, taux_fixes = afficher_objectifs_mois(
+                df_budget,
+                revenus
+            )
+
+            afficher_score_financier(
+                taux_depenses,
+                taux_epargne,
+                taux_baraka,
+                taux_fixes,
+                solde
+            )
+            repartition_depenses = (
+                df_budget[df_budget["type_adeb"] == "Dépenses"]
+                .groupby("categorie_adeb")["amount"]
+                .sum()
+                .abs()
+                .sort_values(ascending=False)
+                .reset_index()
+            )
+
+            repartition_depenses.columns = ["Catégorie", "Montant"]
+            afficher_analyse_intelligente(
+                solde,
+                taux_logement,
+                taux_fixes,
+                taux_depenses,
+                taux_epargne,
+                taux_baraka,
+                repartition_depenses
+            )
+
+            afficher_recommandations(
+                revenus,
+                depenses,
+                baraka,
+                epargne,
+                solde,
+                repartition_depenses
+            )
+
+        with tab2:
+            afficher_graphiques_budget(
+                df_budget,
+                depenses,
+                baraka,
+                epargne,
+                solde,
+                key_suffix="depenses"
+            )
+
+        with tab3:
+            afficher_baraka(
+                df_budget,
+                key_suffix="baraka"
+            )
+
+        with tab4:
+            st.subheader("Transactions classifiées")
+
+            st.dataframe(
+                df[
+                    [
+                        "dateOp",
+                        "label",
+                        "amount",
+                        "type_adeb",
+                        "categorie_adeb",
+                        "sous_categorie_adeb",
+                    ]
+                ],
+                use_container_width=True
+            )
