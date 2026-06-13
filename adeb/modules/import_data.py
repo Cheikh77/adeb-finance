@@ -3,6 +3,7 @@ import streamlit as st
 
 from modules.classification import nettoyer_montant, mapper_adeb
 
+print("IMPORT_DATA CHARGÉ")
 
 def importer_releve(uploaded_file):
     df = pd.read_csv(uploaded_file, sep=";")
@@ -28,73 +29,131 @@ def filtrer_mois(df):
 
     return df[df["mois"] == mois_selectionne]
 
+
 def detecter_virements_neutres(df, delai_jours=7):
-    
-    # On travaille sur une copie pour ne pas modifier
-    # le dataframe d'origine directement
+    """
+    Détecte les virements reçus puis renvoyés.
+
+    Exemple :
+    +2625 € reçu
+    -2625 € renvoyé
+
+    Impact financier réel = 0 €.
+    Ces opérations doivent donc être exclues des revenus et dépenses.
+    """
+
     df = df.copy()
 
-    # Colonne qui indiquera si la transaction est un
-    # virement neutre (argent reçu puis renvoyé)
     df["virement_neutre"] = False
 
-    # On récupère uniquement les transactions
-    # contenant "VIR" dans le libellé
     virements = df[
-        df["label"].astype(str).str.upper().str.contains("VIR", na=False)
+        df["label"]
+        .astype(str)
+        .str.upper()
+        .str.contains("VIR", na=False)
     ].copy()
 
-    # On crée le montant absolu :
-    # +2625 devient 2625
-    # -2625 devient 2625
     virements["montant_abs"] = virements["amount"].abs().round(2)
 
-    # On parcourt tous les virements
     for i, ligne in virements.iterrows():
 
-        # Montant de la transaction courante
         montant = ligne["amount"]
-
-        # Valeur absolue du montant
         montant_abs = round(abs(montant), 2)
-
-        # Date de la transaction
         date_ligne = ligne["dateOp"]
 
-        # Recherche d'un virement correspondant :
-        # - même montant absolu
-        # - signe opposé (+ / -)
-        # - dans une fenêtre de quelques jours
         candidats = virements[
             (virements.index != i) &
             (virements["montant_abs"] == montant_abs) &
             (virements["amount"] * montant < 0) &
             (
-                (virements["dateOp"] - date_ligne)
-                .abs()
+                (virements["dateOp"] - date_ligne).abs()
                 <= pd.Timedelta(days=delai_jours)
             )
         ]
 
-        # Si on trouve un candidat
         if not candidats.empty:
-
-            # On prend le premier candidat trouvé
             index_candidat = candidats.index[0]
 
-            # On marque les deux transactions
-            # comme virements neutres
             df.loc[i, "virement_neutre"] = True
             df.loc[index_candidat, "virement_neutre"] = True
 
     return df
-def classifier_transactions(df):
-    df[["type_adeb", "categorie_adeb", "sous_categorie_adeb"]] = df.apply(
+
+
+def detecter_virements_personnels(
+    df,
+    nom_utilisateur="",
+    prenom_utilisateur=""
+):
+    """
+    Détecte les virements où le nom/prénom de l'utilisateur apparaît
+    dans le libellé.
+
+    Objectif :
+    identifier les transferts entre comptes personnels afin de ne pas
+    les considérer comme de vrais revenus ou de vraies dépenses.
+    """
+
+    df = df.copy()
+
+    nom_utilisateur = str(nom_utilisateur).upper().strip()
+    prenom_utilisateur = str(prenom_utilisateur).upper().strip()
+
+    if not nom_utilisateur and not prenom_utilisateur:
+        df["virement_personnel"] = False
+        return df
+
+    nom_complet = f"{prenom_utilisateur} {nom_utilisateur}".strip()
+    nom_inverse = f"{nom_utilisateur} {prenom_utilisateur}".strip()
+
+    label_upper = df["label"].astype(str).str.upper()
+
+    masque_virement = label_upper.str.contains("VIR", na=False)
+
+    masque_nom = (
+        label_upper.str.contains(nom_complet, na=False)
+        if nom_complet
+        else False
+    )
+
+    masque_nom_inverse = (
+        label_upper.str.contains(nom_inverse, na=False)
+        if nom_inverse
+        else False
+    )
+
+    df["virement_personnel"] = (
+        masque_virement &
+        (masque_nom | masque_nom_inverse)
+    )
+
+    return df
+
+
+def classifier_transactions(
+    df,
+    nom_utilisateur="",
+    prenom_utilisateur=""
+):
+    df = df.copy()
+
+    df[[
+        "type_adeb",
+        "categorie_adeb",
+        "sous_categorie_adeb"
+    ]] = df.apply(
         mapper_adeb,
         axis=1,
         result_type="expand"
     )
+
     df = detecter_virements_neutres(df)
+
+    df = detecter_virements_personnels(
+        df,
+        nom_utilisateur=nom_utilisateur,
+        prenom_utilisateur=prenom_utilisateur
+    )
 
     df.loc[
         df["virement_neutre"],
@@ -104,4 +163,14 @@ def classifier_transactions(df):
         "Virement neutre",
         "Argent reçu puis renvoyé"
     ]
+
+    df.loc[
+        df["virement_personnel"],
+        ["type_adeb", "categorie_adeb", "sous_categorie_adeb"]
+    ] = [
+        "Transfert",
+        "Virement personnel",
+        "Transfert entre comptes personnels"
+    ]
+
     return df

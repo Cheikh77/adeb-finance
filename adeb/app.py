@@ -50,14 +50,25 @@ if page == "Objectifs":
     afficher_objectifs()
 
 
-elif page == "Zakat":
-    afficher_zakat()
-
-
 elif page == "Dashboard":
 
-    c1, c2, c3 = st.columns(3)
+    st.markdown("### Profil utilisateur")
 
+    col_nom, col_prenom = st.columns(2)
+
+    with col_nom:
+        nom_utilisateur = st.text_input("Nom", key="nom_utilisateur")
+
+    with col_prenom:
+        prenom_utilisateur = st.text_input("Prénom", key="prenom_utilisateur")
+
+    profil_complet = bool(nom_utilisateur.strip()) and bool(prenom_utilisateur.strip())
+
+    if not profil_complet:
+        st.warning("Veuillez renseigner votre nom et votre prénom avant d’importer votre relevé bancaire.")
+        st.stop()
+
+    c1, c2, c3 = st.columns(3)
     with c1:
         st.info("Importez votre relevé CSV")
 
@@ -76,11 +87,15 @@ elif page == "Dashboard":
 
         df = importer_releve(uploaded_file)
         df = filtrer_mois(df)
-        df = classifier_transactions(df)
+
+        df = classifier_transactions(
+            df,
+            nom_utilisateur=nom_utilisateur,
+            prenom_utilisateur=prenom_utilisateur
+        )
 
         afficher_transactions_non_classifiees(df)
 
-        # Exclusion des transferts neutres des calculs budgétaires
         df_budget = df[df["type_adeb"] != "Transfert"]
 
         revenus = df_budget[df_budget["type_adeb"] == "Revenus"]["amount"].sum()
@@ -105,6 +120,17 @@ elif page == "Dashboard":
             baraka,
             epargne
         )
+
+        repartition_depenses = (
+            df_budget[df_budget["type_adeb"] == "Dépenses"]
+            .groupby("categorie_adeb")["amount"]
+            .sum()
+            .abs()
+            .sort_values(ascending=False)
+            .reset_index()
+        )
+
+        repartition_depenses.columns = ["Catégorie", "Montant"]
 
         tab1, tab2, tab3, tab4 = st.tabs([
             "Vue générale",
@@ -140,16 +166,7 @@ elif page == "Dashboard":
                 taux_fixes,
                 solde
             )
-            repartition_depenses = (
-                df_budget[df_budget["type_adeb"] == "Dépenses"]
-                .groupby("categorie_adeb")["amount"]
-                .sum()
-                .abs()
-                .sort_values(ascending=False)
-                .reset_index()
-            )
 
-            repartition_depenses.columns = ["Catégorie", "Montant"]
             afficher_analyse_intelligente(
                 solde,
                 taux_logement,
