@@ -21,9 +21,14 @@ from modules.non_classifiees import afficher_transactions_non_classifiees
 st.set_page_config(page_title="Adeb Finance", layout="wide")
 
 
+from pathlib import Path
+
 def load_css(file_path):
-    with open(file_path, encoding="utf-8") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    css_path = Path(__file__).parent / file_path
+
+    if css_path.exists():
+        with open(css_path, encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 
 load_css("assets/style.css")
